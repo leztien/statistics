@@ -1,0 +1,51 @@
+"""
+recreate the linear regression model summary ala R
+calculating standard error of estimates etc.
+"""
+
+#HOW sklearn.utils.resample FUNCTIONS
+import numpy, pandas, sklearn; from sklearn import linear_model
+m,n = 10,3
+X = numpy.random.randn(m,n).round(2)                  # making some data
+y = (X * [2, 0.5, -1]).sum(axis=1) + 100  # round() adds some error (implicetely)
+y = y + numpy.random.normal(loc=0, scale=numpy.std(y)/2, size=m)
+X_resample, y_resample = sklearn.utils.resample(X,y)  # (re)sample of m observations done with replacement
+
+#get the weights (by building a linear model using the entire dataset)
+md = linear_model.LinearRegression(fit_intercept=True)  # meaning: the bias column must be added
+md.fit(X,y)   # fit the entire dataset
+weights = [md.intercept_, *md.coef_]
+sr = pandas.Series(weights, index=["bias","x1","x2","x3"], name="weights").round(2)
+
+# estimating the standard deviations of the estimates by resampling
+slopes = list()
+for i in range(100):  
+    X_resample, y_resample = sklearn.utils.resample(X,y)  # samples from X,y (with replacement)
+    md.fit(X_resample, y_resample)
+    weights = [md.intercept_, *md.coef_]
+    slopes.append(weights)
+       
+weights_deviations = numpy.std(slopes, axis=0) # standard coefficient error (cell #2 in R)
+df = pandas.DataFrame({"weights":sr, "deviations":weights_deviations}) #deviations = standard error of coefficients
+
+# estimating the standard deviations of estimates via formula
+from math import sqrt
+ytrue = y
+ypred = md.predict(X)
+SSE = ((ytrue - ypred)**2).sum()
+sd_of_resuduals = sqrt(SSE/(m-2))  #standard deviation of residuals
+sd_of_estimates = [sd_of_resuduals/sqrt(((x-x.mean())**2).sum()) for x in X.T]
+df["deviations"] = [df["deviations"][0], *sd_of_estimates]
+df["t"] = df["weights"] / df["deviations"]
+
+from scipy.stats import t
+pt = t.cdf
+pvalue = lambda t: (pt(t, df=m-2) if t<0 else (1-pt(t, df=m-2)))*2
+df["p-value"] = df["t"].apply(pvalue).round(4)
+
+
+numpy.savetxt("data.csv", numpy.c_[y[:,None],X], fmt='%f', delimiter=",")
+print(df)
+
+
+
